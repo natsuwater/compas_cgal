@@ -262,3 +262,179 @@ def weighted_offset_polygon(points, offset, weights) -> list[Polygon]:
     else:
         offset_polygons = _straight_skeleton_2.create_weighted_offset_polygons_2_inner(V, offset, W)
         return [Polygon(points.tolist()) for points in offset_polygons]
+
+
+def weighted_offset_polygon_with_holes_inner(points, holes, offset, weights, holes_weights=None) -> list[Tuple[Polygon, list[Polygon]]]:
+    """Compute the inner offset from a 2D polygon with holes with weights.
+
+    Parameters
+    ----------
+    points
+        The points of the 2D polygon.
+    holes
+        The holes of the polygon.
+    offset
+        The offset distance. Must be positive.
+    weights
+        The weights for each edge of the outer boundary, starting with the edge between the last and the first point.
+    holes_weights
+        The weights for the edges of each hole.
+
+    Returns
+    -------
+    list[tuple[Polygon, list[Polygon]]]
+        The polygons with holes.
+
+    Raises
+    ------
+    ValueError
+        If the normal of the polygon is not directed vertically upwards like [0, 0, 1].
+        If the normal of a hole is not directed vertically downwards like [0, 0, -1].
+    """
+    points = list(points)
+    normal = normal_polygon(points, True)
+
+    if TOL.is_allclose(normal, [0, 0, -1]):
+        points.reverse()
+        normal *= -1
+
+    if not TOL.is_allclose(normal, [0, 0, 1]):
+        raise ValueError("The normal of the polygon should be [0, 0, 1]. The normal of the provided polygon is {}".format(normal))
+    V = np.asarray(points, dtype=np.float64, order="C")
+
+    H = []
+    for i, hole in enumerate(holes):
+        hole_pts = list(hole)
+        normal_hole = normal_polygon(hole_pts, True)
+
+        if TOL.is_allclose(normal_hole, [0, 0, 1]):
+            hole_pts.reverse()
+            normal_hole *= -1
+
+        if not TOL.is_allclose(normal_hole, [0, 0, -1]):
+            raise ValueError("The normal of the hole should be [0, 0, -1]. The normal of the provided {}-th hole is {}".format(i, normal_hole))
+
+        hole_arr = np.asarray(hole_pts, dtype=np.float64, order="C")
+        H.append(hole_arr)
+
+    offset = float(offset)
+    if offset < 0:
+        raise ValueError("Offset distance must be positive for inner offset.")
+
+    # Flatten all weights: outer boundary edges, then each hole edges
+    all_weights = list(weights)
+    if len(all_weights) != len(points):
+        raise ValueError("The number of weights for outer boundary must be equal to the number of points")
+        
+    if holes_weights is not None:
+        if len(holes_weights) != len(holes):
+            raise ValueError("holes_weights length must match the number of holes")
+        for i, hw in enumerate(holes_weights):
+            hw_list = list(hw)
+            if len(hw_list) != len(holes[i]):
+                raise ValueError("The number of weights for {}-th hole must be equal to the number of points in the hole".format(i))
+            all_weights.extend(hw_list)
+    else:
+        # fill with 1.0 if not provided
+        for h in holes:
+            all_weights.extend([1.0] * len(h))
+             
+    W_edges = np.asarray(all_weights, dtype=np.float64, order="C").reshape(-1, 1)
+    offset_polygons = _straight_skeleton_2.create_weighted_offset_polygons_2_inner_with_holes(V, H, offset, W_edges)
+
+    result = []
+    for points_list in offset_polygons:
+        polygon = Polygon(points_list[0].tolist())
+        holes_res = []
+        for hole_res in points_list[1:]:
+            holes_res.append(Polygon(hole_res.tolist()))
+        result.append((polygon, holes_res))
+    return result
+
+
+def weighted_offset_polygon_with_holes_outer(points, holes, offset, weights, holes_weights=None) -> list[Tuple[Polygon, list[Polygon]]]:
+    """Compute the outer offset from a 2D polygon with holes with edge weights.
+
+    Parameters
+    ----------
+    points
+        The points of the 2D polygon.
+    holes
+        The holes of the polygon.
+    offset
+        The offset distance. Must be positive.
+    weights
+        A list of floats representing the offset weight for each boundary edge.
+    holes_weights
+        A list of lists of floats representing the offset weight for each hole edge.
+
+    Returns
+    -------
+    list[tuple[Polygon, list[Polygon]]]
+        The polygons with holes.
+
+    Raises
+    ------
+    ValueError
+        If the normal of the polygon is not directed vertically upwards like [0, 0, 1].
+        If the normal of a hole is not directed vertically downwards like [0, 0, -1].
+    """
+    points = list(points)
+    normal = normal_polygon(points, True)
+
+    if TOL.is_allclose(normal, [0, 0, -1]):
+        points.reverse()
+        normal *= -1
+
+    if not TOL.is_allclose(normal, [0, 0, 1]):
+        raise ValueError("The normal of the polygon should be [0, 0, 1]. The normal of the provided polygon is {}".format(normal))
+    V = np.asarray(points, dtype=np.float64, order="C")
+
+    H = []
+    for i, hole in enumerate(holes):
+        hole_pts = list(hole)
+        normal_hole = normal_polygon(hole_pts, True)
+
+        if TOL.is_allclose(normal_hole, [0, 0, 1]):
+            hole_pts.reverse()
+            normal_hole *= -1
+
+        if not TOL.is_allclose(normal_hole, [0, 0, -1]):
+            raise ValueError("The normal of the hole should be [0, 0, -1]. The normal of the provided {}-th hole is {}".format(i, normal_hole))
+
+        hole_arr = np.asarray(hole_pts, dtype=np.float64, order="C")
+        H.append(hole_arr)
+
+    offset = float(offset)
+    if offset < 0:
+        offset = abs(offset)
+
+    # weight handling
+    all_weights = list(weights)
+    if len(all_weights) != len(points):
+        raise ValueError("The number of weights for outer boundary must be equal to the number of points")
+        
+    if holes_weights is not None:
+        if len(holes_weights) != len(holes):
+            raise ValueError("holes_weights length must match the number of holes")
+        for i, hw in enumerate(holes_weights):
+            hw_list = list(hw)
+            if len(hw_list) != len(holes[i]):
+                raise ValueError("The number of weights for {}-th hole must be equal to the number of points in the hole".format(i))
+            all_weights.extend(hw_list)
+    else:
+        # fill with 1.0 if not provided
+        for h in holes:
+            all_weights.extend([1.0] * len(h))
+             
+    W_edges = np.asarray(all_weights, dtype=np.float64, order="C").reshape(-1, 1)
+    offset_polygons = _straight_skeleton_2.create_weighted_offset_polygons_2_outer_with_holes(V, H, offset, W_edges)
+    
+    result = []
+    for points_list in offset_polygons:
+        polygon = Polygon(points_list[0].tolist())
+        holes_res = []
+        for hole_res in points_list[1:]:
+            holes_res.append(Polygon(hole_res.tolist()))
+        result.append((polygon, holes_res))
+    return result

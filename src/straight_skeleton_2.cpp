@@ -299,6 +299,152 @@ pmp_create_weighted_offset_polygons_2_outer(
         throw std::runtime_error("CGAL precondition failed: Invalid input for weighted offset");
     }
 }
+
+std::vector<std::vector<compas::RowMatrixXd>>
+pmp_create_weighted_offset_polygons_2_inner_with_holes(
+    Eigen::Ref<const compas::RowMatrixXd> boundary_vertices,
+    const std::vector<compas::RowMatrixXd>& hole_vertices,
+    double offset_distance,
+    Eigen::Ref<const compas::RowMatrixXd> edge_weights)
+{
+    Polygon_with_holes polygon = data_to_polygon_with_holes(boundary_vertices, hole_vertices);
+    
+    int expected_edges = boundary_vertices.rows();
+    for (const auto& hole : hole_vertices) {
+        expected_edges += hole.rows();
+    }
+    
+    if (edge_weights.rows() != expected_edges) {
+        throw std::invalid_argument("Number of weights must match total number of polygon edges (boundary + holes)");
+    }
+
+    std::vector<double> weight_values;
+    weight_values.reserve(edge_weights.rows());
+    for (int i = 0; i < edge_weights.rows(); i++) {
+        if (edge_weights(i, 0) <= 0) {
+            throw std::invalid_argument("Weights must be positive");
+        }
+        weight_values.push_back(edge_weights(i, 0));
+    }
+
+    std::vector<double> outer_weights(weight_values.begin(), weight_values.begin() + boundary_vertices.rows());
+    std::vector<std::vector<double>> holes_weights;
+    size_t weight_idx = boundary_vertices.rows();
+    for (auto hit = polygon.holes_begin(); hit != polygon.holes_end(); ++hit) {
+        size_t hole_size = hit->size();
+        holes_weights.emplace_back(weight_values.begin() + weight_idx, weight_values.begin() + weight_idx + hole_size);
+        weight_idx += hole_size;
+    }
+
+    try {
+        SsPtr skeleton = CGAL::create_interior_weighted_straight_skeleton_2(
+            polygon.outer_boundary().vertices_begin(), polygon.outer_boundary().vertices_end(),
+            polygon.holes_begin(), polygon.holes_end(),
+            outer_weights.begin(), outer_weights.end(),
+            holes_weights.begin(), holes_weights.end(),
+            CGAL::Exact_predicates_inexact_constructions_kernel()
+        );
+        if (!skeleton) throw std::runtime_error("Failed to create weighted straight skeleton");
+
+        PolygonPtrVector offset_polygons = CGAL::create_offset_polygons_2<Polygon_2>(offset_distance, *skeleton);
+        PolygonWithHolesPtrVector arranged = CGAL::arrange_offset_polygons_2<Polygon_with_holes>(offset_polygons);
+
+        std::vector<std::vector<compas::RowMatrixXd>> result;
+        for(const PolygonWithHolesPtr& offset_polygon : arranged) {
+            std::vector<compas::RowMatrixXd> polygon_with_holes_data;
+            polygon_with_holes_data.push_back(polygon_to_data(offset_polygon->outer_boundary()));
+            for(const auto& hole : offset_polygon->holes()) {
+                polygon_with_holes_data.push_back(polygon_to_data(hole));
+            }
+            result.push_back(polygon_with_holes_data);
+        }
+        return result;
+    } catch (const CGAL::Precondition_exception& e) {
+        throw std::runtime_error("CGAL precondition failed: Invalid input for inner weighted offset with holes");
+    }
+}
+
+std::vector<std::vector<compas::RowMatrixXd>>
+pmp_create_weighted_offset_polygons_2_outer_with_holes(
+    Eigen::Ref<const compas::RowMatrixXd> boundary_vertices,
+    const std::vector<compas::RowMatrixXd>& hole_vertices,
+    double offset_distance,
+    Eigen::Ref<const compas::RowMatrixXd> edge_weights)
+{
+    Polygon_with_holes polygon = data_to_polygon_with_holes(boundary_vertices, hole_vertices);
+    
+    int expected_edges = boundary_vertices.rows();
+    for (const auto& hole : hole_vertices) {
+        expected_edges += hole.rows();
+    }
+    
+    if (edge_weights.rows() != expected_edges) {
+        throw std::invalid_argument("Number of weights must match total number of polygon edges (boundary + holes)");
+    }
+
+    std::vector<double> weight_values;
+    weight_values.reserve(edge_weights.rows());
+    for (int i = 0; i < edge_weights.rows(); i++) {
+        if (edge_weights(i, 0) <= 0) {
+            throw std::invalid_argument("Weights must be positive");
+        }
+        weight_values.push_back(edge_weights(i, 0));
+    }
+
+    try {
+        std::vector<std::shared_ptr<Polygon_2>> raw_output;
+        
+        // 1. Exterior offset of outer boundary
+        std::vector<double> outer_weights(weight_values.begin(), weight_values.begin() + boundary_vertices.rows());
+        SsPtr outer_skel = CGAL::create_exterior_weighted_straight_skeleton_2(offset_distance, polygon.outer_boundary(), outer_weights, CGAL::Exact_predicates_inexact_constructions_kernel());
+        if (!outer_skel) throw std::runtime_error("Failed to create outer skeleton");
+        
+        PolygonPtrVector outer_offsets = CGAL::create_offset_polygons_2<Polygon_2>(offset_distance, *outer_skel);
+        
+        if(!outer_offsets.empty()) {
+            std::swap(outer_offsets[0], outer_offsets.back());
+            outer_offsets.pop_back();
+        }
+        for(auto ptr : outer_offsets) {
+            ptr->reverse_orientation();
+            raw_output.push_back(ptr);
+        }
+
+        // 2. Interior offset of holes
+        size_t weight_idx = boundary_vertices.rows();
+        for (auto hit = polygon.holes_begin(); hit != polygon.holes_end(); ++hit) {
+            Polygon_2 hole = *hit;
+            hole.reverse_orientation();
+            size_t hole_size = hole.size();
+            std::vector<double> hole_weights(weight_values.begin() + weight_idx, weight_values.begin() + weight_idx + hole_size);
+            weight_idx += hole_size;
+            
+            SsPtr hole_skel = CGAL::create_interior_weighted_straight_skeleton_2(hole, hole_weights, CGAL::Exact_predicates_inexact_constructions_kernel());
+            if (!hole_skel) throw std::runtime_error("Failed to create hole skeleton");
+            
+            PolygonPtrVector hole_offsets = CGAL::create_offset_polygons_2<Polygon_2>(offset_distance, *hole_skel);
+            for(auto ptr : hole_offsets) {
+                raw_output.push_back(ptr);
+            }
+        }
+
+        PolygonWithHolesPtrVector arranged = CGAL::arrange_offset_polygons_2<Polygon_with_holes>(raw_output);
+
+        std::vector<std::vector<compas::RowMatrixXd>> result;
+        for(const auto& offset_polygon : arranged) {
+            std::vector<compas::RowMatrixXd> polygon_with_holes_data;
+            polygon_with_holes_data.push_back(polygon_to_data(offset_polygon->outer_boundary()));
+            for(const auto& hole : offset_polygon->holes()) {
+                polygon_with_holes_data.push_back(polygon_to_data(hole));
+            }
+            result.push_back(polygon_with_holes_data);
+        }
+        return result;
+    } catch (const CGAL::Precondition_exception& e) {
+        throw std::runtime_error("CGAL precondition failed: Invalid input for outer weighted offset with holes");
+    }
+}
+
 NB_MODULE(_straight_skeleton_2, m) {
 
     m.def(
@@ -459,4 +605,52 @@ NB_MODULE(_straight_skeleton_2, m) {
         "vertices"_a,
         "offset_distance"_a,
         "edge_weights"_a);
+
+    m.def(
+        "create_weighted_offset_polygons_2_inner_with_holes",
+        &pmp_create_weighted_offset_polygons_2_inner_with_holes,
+        "Create inward weighted offset polygons from a polygon with holes.\n\n"
+        "Parameters\n"
+        "----------\n"
+        "boundary_vertices : array-like\n"
+        "    Matrix of boundary vertex positions (Nx2, float64)\n"
+        "hole_vertices : list\n"
+        "    List of hole vertex matrices (each Mx2, float64)\n"
+        "offset_distance : float\n"
+        "    Offset distance (must be positive)\n"
+        "edge_weights : array-like\n"
+        "    Matrix of all edge weights flattened (boundary edges then each hole edges, float64, must be positive)\n"
+        "\n"
+        "Returns\n"
+        "-------\n"
+        "list\n"
+        "    List of tuples (outer polygon, list of hole polygons)",
+        "boundary_vertices"_a,
+        "hole_vertices"_a,
+        "offset_distance"_a,
+        "edge_weights"_a);
+
+    m.def(
+        "create_weighted_offset_polygons_2_outer_with_holes",
+        &pmp_create_weighted_offset_polygons_2_outer_with_holes,
+        "Create outward weighted offset polygons from a polygon with holes.\n\n"
+        "Parameters\n"
+        "----------\n"
+        "boundary_vertices : array-like\n"
+        "    Matrix of boundary vertex positions (Nx2, float64)\n"
+        "hole_vertices : list\n"
+        "    List of hole vertex matrices (each Mx2, float64)\n"
+        "offset_distance : float\n"
+        "    Offset distance (must be positive)\n"
+        "contour_weights : array-like\n"
+        "    Matrix of contour weights (1 for boundary + 1 for each hole, float64, must be positive)\n"
+        "\n"
+        "Returns\n"
+        "-------\n"
+        "list\n"
+        "    List of tuples (outer polygon, list of hole polygons)",
+        "boundary_vertices"_a,
+        "hole_vertices"_a,
+        "offset_distance"_a,
+        "contour_weights"_a);
 }

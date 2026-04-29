@@ -20,7 +20,7 @@ option(ENABLE_PRECOMPILED_HEADERS "Enable precompiled headers for the build" OFF
 
 if(MSVC)
 set(CMAKE_GENERATOR_PLATFORM x64)
-    add_compile_options(/Zm1200) 
+    add_compile_options(/Zm1200 /utf-8) 
 endif()
 
 # =====================================================================

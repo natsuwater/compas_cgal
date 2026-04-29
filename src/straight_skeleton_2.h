@@ -142,4 +142,38 @@ pmp_create_weighted_offset_polygons_2_outer(
     Eigen::Ref<const compas::RowMatrixXd> edge_weights
 );
 
+/**
+ * @brief Create weighted offset polygons for the interior of a polygon with holes.
+ * 
+ * @param boundary_vertices Matrix of boundary polygon vertices as Nx2 matrix in row-major order (float64)
+ * @param hole_vertices Vector of hole polygons, each as Mx2 matrix in row-major order (float64)
+ * @param offset_distance Offset distance (must be positive)
+ * @param edge_weights Matrix of weights for each edge as Kx1 matrix (float64) where K is total edges.
+ * @return std::vector<std::vector<compas::RowMatrixXd>> Vector containing offsets.
+ */
+std::vector<std::vector<compas::RowMatrixXd>>
+pmp_create_weighted_offset_polygons_2_inner_with_holes(
+    Eigen::Ref<const compas::RowMatrixXd> boundary_vertices,
+    const std::vector<compas::RowMatrixXd>& hole_vertices,
+    double offset_distance,
+    Eigen::Ref<const compas::RowMatrixXd> edge_weights
+);
+
+/**
+ * @brief Create weighted offset polygons for the exterior of a polygon with holes.
+ * 
+ * @param boundary_vertices Matrix of boundary polygon vertices as Nx2 matrix in row-major order (float64)
+ * @param hole_vertices Vector of hole polygons, each as Mx2 matrix in row-major order (float64)
+ * @param offset_distance Offset distance (must be positive)
+ * @param contour_weights Matrix of weights for each contour as Cx1 matrix (float64) where C is 1 + holes.size().
+ * @return std::vector<std::vector<compas::RowMatrixXd>> Vector containing offsets.
+ */
+std::vector<std::vector<compas::RowMatrixXd>>
+pmp_create_weighted_offset_polygons_2_outer_with_holes(
+    Eigen::Ref<const compas::RowMatrixXd> boundary_vertices,
+    const std::vector<compas::RowMatrixXd>& hole_vertices,
+    double offset_distance,
+    Eigen::Ref<const compas::RowMatrixXd> contour_weights
+);
+
 void init_straight_skeleton_2(nb::module_& m);
