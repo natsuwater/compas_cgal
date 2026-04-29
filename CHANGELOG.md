@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+
+### Changed
+
+### Removed
+
+
+## [0.9.3] 2026-04-27
+
+### Added
 * Added `compas_cgal.isolines.isolines` for extracting isoline polylines from vertex scalar fields.
 * Added  `compas_cgal.skeletonization.mesh_skeleton_with_mapping`
 - `HeatGeodesicSolver` class with precomputation for repeated queries
